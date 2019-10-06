@@ -24,7 +24,7 @@ import (
 )
 
 type EventHistory struct {
-	Queue      eventQueue
+	Queue      eventQueue // 环形队列，队列满之后会覆盖之前的元素，到时历史时间丢失
 	StartIndex uint64
 	LastIndex  uint64
 	rwl        sync.RWMutex

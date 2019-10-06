@@ -53,12 +53,12 @@ func openBackend(cfg ServerConfig) backend.Backend {
 	fn := cfg.backendPath()
 	beOpened := make(chan backend.Backend)
 	go func() {
-		beOpened <- newBackend(cfg)
+		beOpened <- newBackend(cfg) // 后台创建一个beOpened channel用于server使用
 	}()
 	select {
 	case be := <-beOpened:
 		return be
-	case <-time.After(10 * time.Second):
+	case <-time.After(10 * time.Second): //如果长时间没有将backend创建出来，表示可能有另外一个etcd正在使用数据库文件，返回错误
 		plog.Warningf("another etcd process is using %q and holds the file lock, or loading backend file is taking >10 seconds", fn)
 		plog.Warningf("waiting for it to exit before starting...")
 	}

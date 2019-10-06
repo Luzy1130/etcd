@@ -73,7 +73,7 @@ func newDir(store *store, nodePath string, createdIndex uint64, parent *node, ex
 		ModifiedIndex: createdIndex,
 		Parent:        parent,
 		ExpireTime:    expireTime,
-		Children:      make(map[string]*node),
+		Children:      make(map[string]*node), // 通过是否存在Children来区分Dir还是KV
 		store:         store,
 	}
 }

@@ -188,9 +188,9 @@ func (t *Transport) Send(msgs []raftpb.Message) {
 
 		if pok {
 			if m.Type == raftpb.MsgApp {
-				t.ServerStats.SendAppendReq(m.Size())
+				t.ServerStats.SendAppendReq(m.Size()) // 用于统计向对端发送的同步应用消息数量
 			}
-			p.send(m)
+			p.send(m) // 调用peers的send接口发送消息给对端
 			continue
 		}
 

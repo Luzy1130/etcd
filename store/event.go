@@ -28,9 +28,9 @@ const (
 type Event struct {
 	Action    string      `json:"action"`
 	Node      *NodeExtern `json:"node,omitempty"`
-	PrevNode  *NodeExtern `json:"prevNode,omitempty"`
-	EtcdIndex uint64      `json:"-"`
-	Refresh   bool        `json:"refresh,omitempty"`
+	PrevNode  *NodeExtern `json:"prevNode,omitempty"` // 更新事情中记录之前的NodeExtern实例
+	EtcdIndex uint64      `json:"-"`                  // 记录Event之后的CurrentIndex
+	Refresh   bool        `json:"refresh,omitempty"`  // 表示Event只刷新了过期时间等信息，没有更新Value等，不触发watcher
 }
 
 func newEvent(action string, key string, modifiedIndex, createdIndex uint64) *Event {

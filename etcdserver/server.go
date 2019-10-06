@@ -259,7 +259,7 @@ type EtcdServer struct {
 // NewServer creates a new EtcdServer from the supplied configuration. The
 // configuration is considered static for the lifetime of the EtcdServer.
 func NewServer(cfg ServerConfig) (srv *EtcdServer, err error) {
-	st := store.New(StoreClusterPrefix, StoreKeysPrefix)
+	st := store.New(StoreClusterPrefix, StoreKeysPrefix) // V2的数据存储目录
 
 	var (
 		w  *wal.WAL
@@ -284,16 +284,16 @@ func NewServer(cfg ServerConfig) (srv *EtcdServer, err error) {
 	}
 	ss := snap.New(cfg.SnapDir())
 
-	bepath := cfg.backendPath()
-	beExist := fileutil.Exist(bepath)
-	be := openBackend(cfg)
+	bepath := cfg.backendPath()       // 获取v3使用的BoltDB数据库文件存放的路劲
+	beExist := fileutil.Exist(bepath) // 检测BoltDB数据库文件是否存在
+	be := openBackend(cfg)            // 创建backend实例
 
 	defer func() {
 		if err != nil {
 			be.Close()
 		}
 	}()
-
+	// 负责实现网络请求
 	prt, err := rafthttp.NewRoundTripper(cfg.PeerTLSInfo, cfg.peerDialTimeout())
 	if err != nil {
 		return nil, err
@@ -380,11 +380,11 @@ func NewServer(cfg ServerConfig) (srv *EtcdServer, err error) {
 			return nil, err
 		}
 		if snapshot != nil {
-			if err = st.Recovery(snapshot.Data); err != nil {
+			if err = st.Recovery(snapshot.Data); err != nil { //从snapshot中恢复V2的数据
 				plog.Panicf("recovered store from snapshot error: %v", err)
 			}
 			plog.Infof("recovered store from snapshot at index %d", snapshot.Metadata.Index)
-			if be, err = recoverSnapshotBackend(cfg, be, *snapshot); err != nil {
+			if be, err = recoverSnapshotBackend(cfg, be, *snapshot); err != nil { // 从snapshot中恢复v3的数据
 				plog.Panicf("recovering backend from snapshot error: %v", err)
 			}
 		}
@@ -525,7 +525,7 @@ func NewServer(cfg ServerConfig) (srv *EtcdServer, err error) {
 	return srv, nil
 }
 
-func (s *EtcdServer) adjustTicks() {
+func (s *EtcdServer) adjustTicks() { // 启动时，快速推进选举时钟触发选举
 	clusterN := len(s.cluster.Members())
 
 	// single-node fresh start, or single-node recovers from snapshot
@@ -574,7 +574,7 @@ func (s *EtcdServer) adjustTicks() {
 // should be implemented in goroutines.
 func (s *EtcdServer) Start() {
 	s.start()
-	s.goAttach(func() { s.adjustTicks() })
+	s.goAttach(func() { s.adjustTicks() }) // 启动后，需要快速推进raft时钟触发选举
 	s.goAttach(func() { s.publish(s.Cfg.ReqTimeout()) })
 	s.goAttach(s.purgeFile)
 	s.goAttach(func() { monitorFileDescriptor(s.stopping) })
@@ -761,7 +761,7 @@ func (s *EtcdServer) run() {
 			}
 		},
 	}
-	s.r.start(rh)
+	s.r.start(rh) // 启动raftNode
 
 	ep := etcdProgress{
 		confState: sn.Metadata.ConfState,
@@ -845,7 +845,7 @@ func (s *EtcdServer) run() {
 			plog.Errorf("%s", err)
 			plog.Infof("the data-dir used by this member must be removed.")
 			return
-		case <-getSyncC():
+		case <-getSyncC(): // 定期清理v2存储中的过期节点
 			if s.store.HasTTLKeys() {
 				s.sync(s.Cfg.ReqTimeout())
 			}
@@ -1300,7 +1300,7 @@ func (s *EtcdServer) sync(timeout time.Duration) {
 // static clientURLs of the server.
 // The function keeps attempting to register until it succeeds,
 // or its server is stopped.
-func (s *EtcdServer) publish(timeout time.Duration) {
+func (s *EtcdServer) publish(timeout time.Duration) { // 将当前节点注册到集群中
 	b, err := json.Marshal(s.attributes)
 	if err != nil {
 		plog.Panicf("json marshal error: %v", err)

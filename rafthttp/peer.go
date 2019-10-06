@@ -145,7 +145,7 @@ func startPeer(transport *Transport, urls types.URLs, peerID types.ID, fs *stats
 		msgAppV2Writer: startStreamWriter(peerID, status, fs, r),
 		writer:         startStreamWriter(peerID, status, fs, r),
 		pipeline:       pipeline,
-		snapSender:     newSnapshotSender(transport, picker, peerID, status),
+		snapSender:     newSnapshotSender(transport, picker, peerID, status), // V3版本中使用该实例传输snapshot
 		recvc:          make(chan raftpb.Message, recvBufSize),
 		propc:          make(chan raftpb.Message, maxPendingProposals),
 		stopc:          make(chan struct{}),
@@ -221,7 +221,7 @@ func (p *peer) send(m raftpb.Message) {
 	writec, name := p.pick(m)
 	select {
 	case writec <- m:
-	default:
+	default: // 如果writec发送缓存已满，则将消息抛弃，并上报给raft模块
 		p.r.ReportUnreachable(m.To)
 		if isMsgSnap(m) {
 			p.r.ReportSnapshot(m.To, raft.SnapshotFailure)
@@ -299,7 +299,7 @@ func (p *peer) pick(m raftpb.Message) (writec chan<- raftpb.Message, picked stri
 	// Considering MsgSnap may have a big size, e.g., 1G, and will block
 	// stream for a long time, only use one of the N pipelines to send MsgSnap.
 	if isMsgSnap(m) {
-		return p.pipeline.msgc, pipelineMsg
+		return p.pipeline.msgc, pipelineMsg // snapshot消息只是用pipeline来发送
 	} else if writec, ok = p.msgAppV2Writer.writec(); ok && isMsgApp(m) {
 		return writec, streamAppV2
 	} else if writec, ok = p.writer.writec(); ok {

@@ -108,7 +108,7 @@ type raftNode struct {
 	readStateC chan raft.ReadState
 
 	// utility
-	ticker *time.Ticker
+	ticker *time.Ticker // 用于推进raft选举和心跳计时器的逻辑时钟
 	// contention detectors for raft heartbeat message
 	td *contention.TimeoutDetector
 
@@ -137,9 +137,9 @@ func newRaftNode(cfg raftNodeConfig) *raftNode {
 		// set up contention detectors for raft heartbeat message.
 		// expect to send a heartbeat within 2 heartbeat intervals.
 		td:         contention.NewTimeoutDetector(2 * cfg.heartbeat),
-		readStateC: make(chan raft.ReadState, 1),
-		msgSnapC:   make(chan raftpb.Message, maxInFlightMsgSnap),
-		applyc:     make(chan apply),
+		readStateC: make(chan raft.ReadState, 1),                  // 待上层模块处理的只读请求
+		msgSnapC:   make(chan raftpb.Message, maxInFlightMsgSnap), // 将要被发送的MsgSnap channel, 由raft模块放入
+		applyc:     make(chan apply),                              // 获取待应用的记录或快照的channel
 		stopped:    make(chan struct{}),
 		done:       make(chan struct{}),
 	}
@@ -171,7 +171,7 @@ func (r *raftNode) start(rh *raftReadyHandler) {
 			select {
 			case <-r.ticker.C:
 				r.tick()
-			case rd := <-r.Ready():
+			case rd := <-r.Ready(): // 处理ready是阻塞操作（例如保存WAL和SNAP）
 				if rd.SoftState != nil {
 					newLeader := rd.SoftState.Lead != raft.None && atomic.LoadUint64(&r.lead) != rd.SoftState.Lead
 					if newLeader {
@@ -198,7 +198,7 @@ func (r *raftNode) start(rh *raftReadyHandler) {
 				if len(rd.ReadStates) != 0 {
 					select {
 					case r.readStateC <- rd.ReadStates[len(rd.ReadStates)-1]:
-					case <-time.After(internalTimeout):
+					case <-time.After(internalTimeout): // 等待1s后，上层还未将之前的取走，则放弃本次写入
 						plog.Warningf("timed out sending read state")
 					case <-r.stopped:
 						return
@@ -209,7 +209,7 @@ func (r *raftNode) start(rh *raftReadyHandler) {
 				ap := apply{
 					entries:  rd.CommittedEntries,
 					snapshot: rd.Snapshot,
-					notifyc:  notifyc,
+					notifyc:  notifyc, // 用于让apply的后台goroutine可以再apply完成后通知本goroutine
 				}
 
 				updateCommittedIndex(&ap, rh)
@@ -250,7 +250,7 @@ func (r *raftNode) start(rh *raftReadyHandler) {
 					plog.Infof("raft applied incoming snapshot at index %d", rd.Snapshot.Metadata.Index)
 					// gofail: var raftAfterApplySnap struct{}
 				}
-
+				// Entry已经写入磁盘,可以将其更新到MemoryStorage，表示本节点已经提交
 				r.raftStorage.Append(rd.Entries)
 
 				if !islead {
@@ -292,7 +292,7 @@ func (r *raftNode) start(rh *raftReadyHandler) {
 					notifyc <- struct{}{}
 				}
 
-				r.Advance()
+				r.Advance() // 通知raft模块Ready处理完成
 			case <-r.stopped:
 				return
 			}
@@ -313,18 +313,19 @@ func updateCommittedIndex(ap *apply, rh *raftReadyHandler) {
 	}
 }
 
+// 对待发送的raft消息进行过滤
 func (r *raftNode) processMessages(ms []raftpb.Message) []raftpb.Message {
 	sentAppResp := false
 	for i := len(ms) - 1; i >= 0; i-- {
-		if r.isIDRemoved(ms[i].To) {
-			ms[i].To = 0
+		if r.isIDRemoved(ms[i].To) { // 目标节点已经被移除
+			ms[i].To = 0 // 发送消息时会忽略To=0的消息
 		}
 
 		if ms[i].Type == raftpb.MsgAppResp {
 			if sentAppResp {
-				ms[i].To = 0
+				ms[i].To = 0 // 除了最后一条MsgAppResp消息，其余的全部忽略
 			} else {
-				sentAppResp = true
+				sentAppResp = true // 最后一条MsgAppResp消息需要发送
 			}
 		}
 
@@ -334,13 +335,14 @@ func (r *raftNode) processMessages(ms []raftpb.Message) []raftpb.Message {
 			// So we need to redirect the msgSnap to etcd server main loop for merging in the
 			// current store snapshot and KV snapshot.
 			select {
-			case r.msgSnapC <- ms[i]:
+			case r.msgSnapC <- ms[i]: // 放入msgSnapC channel中等待发送
 			default:
 				// drop msgSnap if the inflight chan if full.
 			}
-			ms[i].To = 0
+			ms[i].To = 0 // msgSnapC操作者会发送，该流程不发送该类型的消息
 		}
 		if ms[i].Type == raftpb.MsgHeartbeat {
+			// 检查心跳消息之间的时间间隔是否过大，并给出报警
 			ok, exceed := r.td.Observe(ms[i].To)
 			if !ok {
 				// TODO: limit request rate.
@@ -435,9 +437,11 @@ func startNode(cfg ServerConfig, cl *membership.RaftCluster, ids []types.ID) (id
 
 func restartNode(cfg ServerConfig, snapshot *raftpb.Snapshot) (types.ID, *membership.RaftCluster, raft.Node, *raft.MemoryStorage, *wal.WAL) {
 	var walsnap walpb.Snapshot
+	// 查看snapshot在wal处于的位置
 	if snapshot != nil {
 		walsnap.Index, walsnap.Term = snapshot.Metadata.Index, snapshot.Metadata.Term
 	}
+	// 对wal进行Entry的回放，snapshot之后的wal数据只是提交，后面还需要重新apply
 	w, id, cid, st, ents := readWAL(cfg.WALDir(), walsnap)
 
 	plog.Infof("restarting member %s in cluster %s at commit index %d", id, cid, st.Commit)

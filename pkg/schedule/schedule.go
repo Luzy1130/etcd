@@ -49,7 +49,7 @@ type fifo struct {
 	resume    chan struct{}
 	scheduled int
 	finished  int
-	pendings  []Job
+	pendings  []Job // job队列
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -67,7 +67,7 @@ func NewFIFOScheduler() Scheduler {
 	}
 	f.finishCond = sync.NewCond(&f.mu)
 	f.ctx, f.cancel = context.WithCancel(context.Background())
-	go f.run()
+	go f.run() // 启动另外一个后台goroutine来执行FIFO中的job
 	return f
 }
 
@@ -82,11 +82,11 @@ func (f *fifo) Schedule(j Job) {
 
 	if len(f.pendings) == 0 {
 		select {
-		case f.resume <- struct{}{}:
+		case f.resume <- struct{}{}: // 如果对列为空，则调度时将处理队列的run函数唤醒
 		default:
 		}
 	}
-	f.pendings = append(f.pendings, j)
+	f.pendings = append(f.pendings, j) // 将job放入队列
 }
 
 func (f *fifo) Pending() int {
@@ -136,12 +136,12 @@ func (f *fifo) run() {
 		f.mu.Lock()
 		if len(f.pendings) != 0 {
 			f.scheduled++
-			todo = f.pendings[0]
+			todo = f.pendings[0] // 从队首取出第一个job准备处理
 		}
 		f.mu.Unlock()
 		if todo == nil {
 			select {
-			case <-f.resume:
+			case <-f.resume: // 当队列中没有job需要处理时，阻塞在这里等待唤醒
 			case <-f.ctx.Done():
 				f.mu.Lock()
 				pendings := f.pendings
@@ -154,10 +154,10 @@ func (f *fifo) run() {
 				return
 			}
 		} else {
-			todo(f.ctx)
-			f.finishCond.L.Lock()
+			todo(f.ctx)           // 处理取出的job
+			f.finishCond.L.Lock() // 这里也加了锁
 			f.finished++
-			f.pendings = f.pendings[1:]
+			f.pendings = f.pendings[1:] // 将队首元素删除
 			f.finishCond.Broadcast()
 			f.finishCond.L.Unlock()
 		}

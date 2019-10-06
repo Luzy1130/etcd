@@ -16,10 +16,11 @@ package raft
 
 import "fmt"
 
+// 用于标记follower接受消息的状态，可以再一些情况下优化leader和follower同步消息的性能
 const (
-	ProgressStateProbe ProgressStateType = iota
-	ProgressStateReplicate
-	ProgressStateSnapshot
+	ProgressStateProbe     ProgressStateType = iota // 表示leader试探地想该follower发送消息，最多发送一条
+	ProgressStateReplicate                          // Prope状态下发送的消息收到响应后，leader可以尝试将所有待同步的消息批量发送给该follwer
+	ProgressStateSnapshot                           // 表示leader可以向该leader发送snapshot
 )
 
 type ProgressStateType uint64
@@ -35,7 +36,7 @@ func (st ProgressStateType) String() string { return prstmap[uint64(st)] }
 // Progress represents a follower’s progress in the view of the leader. Leader maintains
 // progresses of all followers, and sends entries to the follower based on its progress.
 type Progress struct {
-	Match, Next uint64
+	Match, Next uint64 // match记录该follower与本leader匹配的entry index，next记录leader应该向本follower发送下一条entry的index
 	// State defines how the leader should interact with the follower.
 	//
 	// When in ProgressStateProbe, leader sends at most one replication message
@@ -117,12 +118,12 @@ func (pr *Progress) becomeSnapshot(snapshoti uint64) {
 // Otherwise it updates the progress and returns true.
 func (pr *Progress) maybeUpdate(n uint64) bool {
 	var updated bool
-	if pr.Match < n {
+	if pr.Match < n { // 更新follower匹配的entry index
 		pr.Match = n
-		updated = true
+		updated = true // 表示follower得到更新
 		pr.resume()
 	}
-	if pr.Next < n+1 {
+	if pr.Next < n+1 { // 更新follower下一条应该同步的entry index
 		pr.Next = n + 1
 	}
 	return updated

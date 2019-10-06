@@ -471,10 +471,10 @@ func (r *raft) sendAppend(to uint64) {
 			// optimistically increase the next when in ProgressStateReplicate
 			case ProgressStateReplicate:
 				last := m.Entries[n-1].Index
-				pr.optimisticUpdate(last)
+				pr.optimisticUpdate(last) // 将Next更新为发送entries的最后一个index.
 				pr.ins.add(last)
 			case ProgressStateProbe:
-				pr.pause()
+				pr.pause() // 第一次向该follwoer发送消息，或者之前出现了Unreachable，同步entry时，先置为pause，这样就一次只发一条msg
 			default:
 				r.logger.Panicf("%x is sending append in unhandled state %s", r.id, pr.State)
 			}
@@ -552,9 +552,9 @@ func (r *raft) maybeCommit() bool {
 	for _, p := range r.prs {
 		mis = append(mis, p.Match)
 	}
-	sort.Sort(sort.Reverse(mis))
-	mci := mis[r.quorum()-1]
-	return r.raftLog.maybeCommit(mci, r.Term)
+	sort.Sort(sort.Reverse(mis))              // 将每个progress中的index降序排列
+	mci := mis[r.quorum()-1]                  // 获取获得半数节点收到的index(这个处理方式比较巧妙，1. 先排序， 2. 取数组中间元素)
+	return r.raftLog.maybeCommit(mci, r.Term) // 将已会的半数节点认可的entry进行commit
 }
 
 func (r *raft) reset(term uint64) {
@@ -875,7 +875,7 @@ type stepFunc func(r *raft, m pb.Message)
 
 func stepLeader(r *raft, m pb.Message) {
 	// These message types do not require any progress for m.From.
-	switch m.Type {
+	switch m.Type { // 下面几个消息不是从其他节点发过来的
 	case pb.MsgBeat:
 		r.bcastHeartbeat()
 		return
@@ -948,7 +948,7 @@ func stepLeader(r *raft, m pb.Message) {
 		return
 	}
 	switch m.Type {
-	case pb.MsgAppResp:
+	case pb.MsgAppResp: // 收到了follower的entry同步消息响应
 		pr.RecentActive = true
 
 		if m.Reject {
@@ -957,15 +957,15 @@ func stepLeader(r *raft, m pb.Message) {
 			if pr.maybeDecrTo(m.Index, m.RejectHint) {
 				r.logger.Debugf("%x decreased progress of %x to [%s]", r.id, m.From, pr)
 				if pr.State == ProgressStateReplicate {
-					pr.becomeProbe()
+					pr.becomeProbe() // replicate状态下对端没有收到消息，则回退到probe状态，
 				}
 				r.sendAppend(m.From)
 			}
-		} else {
+		} else { // 对端接受了相应的MsgApp消息
 			oldPaused := pr.IsPaused()
-			if pr.maybeUpdate(m.Index) {
+			if pr.maybeUpdate(m.Index) { // 更新progress的Match和Next
 				switch {
-				case pr.State == ProgressStateProbe:
+				case pr.State == ProgressStateProbe: // 对端回复响应说明可以正确处理消息，则切为replicate状态加快同步操作
 					pr.becomeReplicate()
 				case pr.State == ProgressStateSnapshot && pr.needSnapshotAbort():
 					r.logger.Debugf("%x snapshot aborted, resumed sending replication messages to %x [%s]", r.id, m.From, pr)
@@ -975,8 +975,8 @@ func stepLeader(r *raft, m pb.Message) {
 				}
 
 				if r.maybeCommit() {
-					r.bcastAppend()
-				} else if oldPaused {
+					r.bcastAppend() // 如果有新的提交说明肯定有follower同步了entry,继续广播同步
+				} else if oldPaused { // 如果没有commit且之前被暂停了，说明回复resp的follower还落后着，继续向该follower同步entry
 					// update() reset the wait state on this node. If we had delayed sending
 					// an update before, send it now.
 					r.sendAppend(m.From)
@@ -1134,7 +1134,7 @@ func stepFollower(r *raft, m pb.Message) {
 	case pb.MsgApp:
 		r.electionElapsed = 0
 		r.lead = m.From
-		r.handleAppendEntries(m)
+		r.handleAppendEntries(m) // 同步leader发过来的entry和index
 	case pb.MsgHeartbeat:
 		r.electionElapsed = 0
 		r.lead = m.From
@@ -1177,14 +1177,16 @@ func stepFollower(r *raft, m pb.Message) {
 }
 
 func (r *raft) handleAppendEntries(m pb.Message) {
-	if m.Index < r.raftLog.committed {
+	if m.Index < r.raftLog.committed { // 告诉leader自己的index已经同步到该位置，将自己的index位置通知给leader
 		r.send(pb.Message{To: m.From, Type: pb.MsgAppResp, Index: r.raftLog.committed})
 		return
 	}
 
 	if mlastIndex, ok := r.raftLog.maybeAppend(m.Index, m.LogTerm, m.Commit, m.Entries...); ok {
+		// 已经同步，回复给leader自己当前最新的index
 		r.send(pb.Message{To: m.From, Type: pb.MsgAppResp, Index: mlastIndex})
 	} else {
+		// 拒绝同步，因为follower中间有部分entry还没有同步过来，脱节了，通知leader自己当前最新的index
 		r.logger.Debugf("%x [logterm: %d, index: %d] rejected msgApp [logterm: %d, index: %d] from %x",
 			r.id, r.raftLog.zeroTermOnErrCompacted(r.raftLog.term(m.Index)), m.Index, m.LogTerm, m.Index, m.From)
 		r.send(pb.Message{To: m.From, Type: pb.MsgAppResp, Index: m.Index, Reject: true, RejectHint: r.raftLog.lastIndex()})

@@ -37,8 +37,8 @@ import (
 )
 
 const (
-	streamTypeMessage  streamType = "message"
-	streamTypeMsgAppV2 streamType = "msgappv2"
+	streamTypeMessage  streamType = "message"  // 最近版本的stream类型，当前是V3版本
+	streamTypeMsgAppV2 streamType = "msgappv2" // V2版本的stream类型，向下兼容
 
 	streamBufSize = 4096
 )

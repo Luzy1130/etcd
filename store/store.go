@@ -97,7 +97,7 @@ func newStore(namespaces ...string) *store {
 		s.Root.Add(newDir(s, namespace, s.CurrentIndex, s.Root, Permanent))
 	}
 	s.Stats = newStats()
-	s.WatcherHub = newWatchHub(1000)
+	s.WatcherHub = newWatchHub(1000) // 最多支持1000个history_event，超过后之前的event将被覆盖
 	s.ttlKeyHeap = newTtlKeyHeap()
 	s.readonlySet = types.NewUnsafeSet(append(namespaces, "/")...)
 	return s

@@ -478,7 +478,7 @@ func (n *node) Status() Status {
 
 func (n *node) ReportUnreachable(id uint64) {
 	select {
-	case n.recvc <- pb.Message{Type: pb.MsgUnreachable, From: id}:
+	case n.recvc <- pb.Message{Type: pb.MsgUnreachable, From: id}: // 向raft-node发送一个unreachable消息
 	case <-n.done:
 	}
 }
