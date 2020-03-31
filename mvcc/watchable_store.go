@@ -42,7 +42,7 @@ type watchable interface {
 }
 
 type watchableStore struct {
-	*store
+	*store // 作为KV的存储引擎, 为“ConsistentWatchableKV”接口实现ConsistentIndex()函数
 
 	// mu protects watcher groups and batches. It should never be locked
 	// before locking store.mu to avoid deadlock.

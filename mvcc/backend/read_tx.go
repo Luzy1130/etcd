@@ -38,7 +38,7 @@ type ReadTx interface {
 type readTx struct {
 	// mu protects accesses to the txReadBuffer
 	mu  sync.RWMutex
-	buf txReadBuffer
+	buf txReadBuffer //  用于缓存bucket与其中kv对集合的映射关系
 
 	// txmu protects accesses to buckets and tx on Range requests.
 	txmu    sync.RWMutex

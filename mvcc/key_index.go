@@ -66,10 +66,12 @@ var (
 // compact(6):
 // generations:
 //    {empty} -> key SHOULD be removed.
+// 支持多版本(mvcc)的实现
 type keyIndex struct {
 	key         []byte
-	modified    revision // the main rev of the last modification
-	generations []generation
+	modified    revision     // the main rev of the last modification， 当前的version信息
+	generations []generation // 保存所有历史的version信息, 如果是删除，则在数组最后一个中追加一个“tomstone”，如果
+	// 再次创建，则向数组后追加一个新的generation来记录
 }
 
 // put puts a revision to the keyIndex.
@@ -311,8 +313,8 @@ func (ki *keyIndex) String() string {
 
 // generation contains multiple revisions of a key.
 type generation struct {
-	ver     int64
-	created revision // when the generation is created (put in first revision).
+	ver     int64    // 当前generation的修改次数
+	created revision // when the generation is created (put in first revision). 创建key时的revision
 	revs    []revision
 }
 

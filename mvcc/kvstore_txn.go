@@ -28,6 +28,7 @@ type storeTxnRead struct {
 	rev      int64
 }
 
+// 返回只读事务
 func (s *store) Read() TxnRead {
 	s.mu.RLock()
 	tx := s.b.ReadTx()
@@ -35,6 +36,7 @@ func (s *store) Read() TxnRead {
 	tx.Lock()
 	firstRev, rev := s.compactMainRev, s.currentRev
 	s.revMu.RUnlock()
+	// mertrics代表增加了一些统计监控信息
 	return newMetricsTxnRead(&storeTxnRead{s, tx, firstRev, rev})
 }
 
@@ -120,11 +122,13 @@ func (tr *storeTxnRead) rangeKeys(key, end []byte, curRev int64, ro RangeOptions
 		return &RangeResult{KVs: nil, Count: -1, Rev: 0}, ErrCompacted
 	}
 
+	// 检查key的索引
 	revpairs := tr.s.kvindex.Revisions(key, end, int64(rev))
 	if len(revpairs) == 0 {
 		return &RangeResult{KVs: nil, Count: 0, Rev: curRev}, nil
 	}
 	if ro.Count {
+		// 如果只需要返回个数，则返回key的revision数量即可
 		return &RangeResult{KVs: nil, Count: len(revpairs), Rev: curRev}, nil
 	}
 
@@ -161,7 +165,7 @@ func (tw *storeTxnWrite) put(key, value []byte, leaseID lease.LeaseID) {
 		oldLease = tw.s.le.GetLease(lease.LeaseItem{Key: string(key)})
 	}
 
-	ibytes := newRevBytes()
+	ibytes := newRevBytes() // 将key和revision组合后的key值
 	idxRev := revision{main: rev, sub: int64(len(tw.changes))}
 	revToBytes(idxRev, ibytes)
 
@@ -180,8 +184,8 @@ func (tw *storeTxnWrite) put(key, value []byte, leaseID lease.LeaseID) {
 		plog.Fatalf("cannot marshal event: %v", err)
 	}
 
-	tw.tx.UnsafeSeqPut(keyBucketName, ibytes, d)
-	tw.s.kvindex.Put(key, idxRev)
+	tw.tx.UnsafeSeqPut(keyBucketName, ibytes, d) // 将改造后的K-V保存
+	tw.s.kvindex.Put(key, idxRev)                // 将key-reversion存入indexTree中
 	tw.changes = append(tw.changes, kv)
 
 	if oldLease != lease.NoLease {

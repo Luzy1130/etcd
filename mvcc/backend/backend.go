@@ -46,9 +46,11 @@ var (
 	minSnapshotWarningTimeout = time.Duration(30 * time.Second)
 )
 
+// Backend 对外（store)提供数据库操作接口，内部实际调用boltDB的接口，是将底层存储和上层应用进行解耦的中间层，
+// 如果有需要还可以跟换boltDB
 type Backend interface {
-	ReadTx() ReadTx
-	BatchTx() BatchTx
+	ReadTx() ReadTx   // 只读事务接口
+	BatchTx() BatchTx // 批量读写事务接口
 
 	Snapshot() Snapshot
 	Hash(ignores map[IgnoreKey]struct{}) (uint32, error)
@@ -72,6 +74,7 @@ type Snapshot interface {
 	Close() error
 }
 
+// 结构体backends是Backend接口的具体实现
 type backend struct {
 	// size and commits are used with atomic operations so they must be
 	// 64-bit aligned, otherwise 32-bit tests will crash
@@ -132,9 +135,9 @@ func newBackend(bcfg BackendConfig) *backend {
 	if boltOpenOptions != nil {
 		*bopts = *boltOpenOptions
 	}
-	bopts.InitialMmapSize = bcfg.mmapSize()
+	bopts.InitialMmapSize = bcfg.mmapSize() // 获取内存映射的大小
 
-	db, err := bolt.Open(bcfg.Path, 0600, bopts)
+	db, err := bolt.Open(bcfg.Path, 0600, bopts) // 打开boltdb数据库
 	if err != nil {
 		plog.Panicf("cannot open database at %s (%v)", bcfg.Path, err)
 	}
@@ -176,19 +179,19 @@ func (b *backend) ForceCommit() {
 	b.batchTx.Commit()
 }
 
-func (b *backend) Snapshot() Snapshot {
-	b.batchTx.Commit()
+func (b *backend) Snapshot() Snapshot { // 用当前DB中的数据创建相应的快照
+	b.batchTx.Commit() // 将当前缓冲区的读写事务提交
 
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	tx, err := b.db.Begin(false)
+	tx, err := b.db.Begin(false) // 开启一个只读事务
 	if err != nil {
 		plog.Fatalf("cannot begin tx (%s)", err)
 	}
 
-	stopc, donec := make(chan struct{}), make(chan struct{})
-	dbBytes := tx.Size()
-	go func() {
+	stopc, donec := make(chan struct{}), make(chan struct{}) //用来提供快照数据是否完成发送的channel
+	dbBytes := tx.Size()                                     // 获取整个DB保存的数据并记录数据大小
+	go func() {                                              // 后台启动一个goroutine用来检测快照数据是否已经发送完成
 		defer close(donec)
 		// sendRateBytes is based on transferring snapshot data over a 1 gigabit/s connection
 		// assuming a min tcp throughput of 100MB/s.
@@ -202,7 +205,7 @@ func (b *backend) Snapshot() Snapshot {
 		defer ticker.Stop()
 		for {
 			select {
-			case <-ticker.C:
+			case <-ticker.C: // 超过预期最大发送时间则打印告警信息
 				plog.Warningf("snapshotting is taking more than %v seconds to finish transferring %v MB [started at %v]", time.Since(start).Seconds(), float64(dbBytes)/float64(1024*1014), start)
 			case <-stopc:
 				snapshotDurations.Observe(time.Since(start).Seconds())
@@ -259,9 +262,9 @@ func (b *backend) SizeInUse() int64 {
 	return atomic.LoadInt64(&b.sizeInUse)
 }
 
-func (b *backend) run() {
+func (b *backend) run() { // 后台起一个gorotuine
 	defer close(b.donec)
-	t := time.NewTimer(b.batchInterval)
+	t := time.NewTimer(b.batchInterval) // 定时提交批量读写数据
 	defer t.Stop()
 	for {
 		select {
@@ -270,8 +273,8 @@ func (b *backend) run() {
 			b.batchTx.CommitAndStop()
 			return
 		}
-		b.batchTx.Commit()
-		t.Reset(b.batchInterval)
+		b.batchTx.Commit()       // 定时器触发后将批量的读写数据提交，并开始一个新的事务
+		t.Reset(b.batchInterval) // 重置定时器
 	}
 }
 

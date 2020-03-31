@@ -54,10 +54,13 @@ func (txw *txWriteBuffer) putSeq(bucket, k, v []byte) {
 	b.add(k, v)
 }
 
+// 将当前的txWriteBuffer中的键值对合并到txReadBuffer中
 func (txw *txWriteBuffer) writeback(txr *txReadBuffer) {
 	for k, wb := range txw.buckets {
 		rb, ok := txr.buckets[k]
 		if !ok {
+			// 如果txr中没有对应的bucket，则不需要合并，直接将txw中的
+			// bucket指向txr即代表完成了写回操作
 			delete(txw.buckets, k)
 			txr.buckets[k] = wb
 			continue
@@ -68,6 +71,7 @@ func (txw *txWriteBuffer) writeback(txr *txReadBuffer) {
 		}
 		rb.merge(wb)
 	}
+	// 合并完成后重置txw
 	txw.reset()
 }
 
@@ -164,6 +168,7 @@ func (bb *bucketBuffer) merge(bbsrc *bucketBuffer) {
 	sort.Stable(bb)
 
 	// remove duplicates, using only newest update
+	// 去重
 	widx := 0
 	for ridx := 1; ridx < bb.used; ridx++ {
 		if !bytes.Equal(bb.buf[ridx].key, bb.buf[widx].key) {

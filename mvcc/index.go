@@ -37,8 +37,8 @@ type index interface {
 }
 
 type treeIndex struct {
-	sync.RWMutex
-	tree *btree.BTree
+	sync.RWMutex // btree的操作西药加锁保护
+	tree         *btree.BTree
 }
 
 func newTreeIndex() index {

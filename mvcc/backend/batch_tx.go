@@ -38,10 +38,10 @@ type BatchTx interface {
 
 type batchTx struct {
 	sync.Mutex
-	tx      *bolt.Tx
-	backend *backend
+	tx      *bolt.Tx // boltdb实例
+	backend *backend // 与之关联的backend
 
-	pending int
+	pending int // 当前batch事务中执行修改的操作个数，当事务提交后，该值会被重置为0
 }
 
 func (t *batchTx) UnsafeCreateBucket(name []byte) {

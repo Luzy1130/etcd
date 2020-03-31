@@ -21,9 +21,9 @@ import (
 )
 
 type RangeOptions struct {
-	Limit int64
-	Rev   int64
-	Count bool
+	Limit int64 // 查询返回的键值对上限
+	Rev   int64 // main revision部分
+	Count bool  // true: 只返回KV个数，不返回具体数据
 }
 
 type RangeResult struct {
@@ -54,6 +54,7 @@ type ReadView interface {
 
 // TxnRead represents a read-only transaction with operations that will not
 // block other read transactions.
+// 表示一个只读事务
 type TxnRead interface {
 	ReadView
 	// End marks the transaction is complete and ready to commit.
@@ -79,6 +80,7 @@ type WriteView interface {
 }
 
 // TxnWrite represents a transaction that can modify the store.
+// 表示一个读写事务
 type TxnWrite interface {
 	TxnRead
 	WriteView

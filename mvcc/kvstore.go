@@ -65,6 +65,7 @@ type ConsistentIndexGetter interface {
 	ConsistentIndex() uint64
 }
 
+// 对“KV interface”的实现
 type store struct {
 	ReadView
 	WriteView
@@ -78,8 +79,8 @@ type store struct {
 
 	ig ConsistentIndexGetter
 
-	b       backend.Backend
-	kvindex index
+	b       backend.Backend // backend作为store与底层数据库bolt之间中间封装层
+	kvindex index           // KV数据读写的接口，有一个btree实现
 
 	le lease.Lessor
 
@@ -111,7 +112,7 @@ func NewStore(b backend.Backend, le lease.Lessor, ig ConsistentIndexGetter) *sto
 
 		le: le,
 
-		currentRev:     1,
+		currentRev:     1, // 当前的主版本
 		compactMainRev: -1,
 
 		bytesBuf8: make([]byte, 8),
